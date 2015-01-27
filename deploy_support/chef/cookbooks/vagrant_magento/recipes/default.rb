@@ -12,6 +12,8 @@ include_recipe "apache2::mod_php5"
 
 chef_gem "versionomy"
 require "versionomy"
+chef_gem "digest"
+require 'digest'
 
 class Chef::Resource
   include MageHelper
@@ -198,6 +200,7 @@ execute "magento-install" do
   action :run
   notifies :run, "execute[reset-unsecure-base_url]", :immediately
   notifies :run, "execute[reset-secure-base_url]", :immediately
+  notifies :run, "execute[reset-admin-login]", :immediately
 end
 
 #HACK: to set unsecure base_url to {{base_url}} 
@@ -216,6 +219,59 @@ execute "reset-secure-base_url" do
   command "mysql -u root -p#{node['mysql']['server_root_password']} #{node['vagrant_magento']['config']['db_name']} -e \"DELETE FROM \"#{db_prefix}core_config_data\" WHERE \"path\" = 'web/secure/base_url'\""
   
   only_if { [node['vagrant_magento']['config']['url']  == "{{base_url}}" && node['vagrant_magento']['config']['secure_url']  == ""] || [node['vagrant_magento']['config']['secure_url']  == "{{base_url}}"] }
+  
+  action :nothing
+  notifies :run, "execute[magento-clearcache]", :immediately 
+end
+
+execute "reset-admin-login" do
+  db_prefix = node['vagrant_magento']['config']['db_prefix']
+  db_name = node['vagrant_magento']['config']['db_name']
+  db_password = node['mysql']['server_root_password']
+  admin_user = node['vagrant_magento']['config']['admin_user']
+  admin_password = node['vagrant_magento']['config']['admin_password']
+  hash_salt = "at"
+  md5_pass = Digest::MD5.hexdigest(hash_salt + admin_password) + ":" + hash_salt
+  admin_lastname = node['vagrant_magento']['config']['admin_lastname']
+  admin_firstname = node['vagrant_magento']['config']['admin_firstname']
+  admin_email = node['vagrant_magento']['config']['admin_email']
+  sql_script = <<-END.gsub(/^ {6}/, '')
+      INSERT INTO admin_user
+        SELECT
+          NULL user_id,
+          "#{admin_firstname}" firstname,
+          "#{admin_lastname}" lastname,
+          "#{admin_email}" email,
+          "#{admin_user}" username,
+          "#{md5_pass}" password,
+          NOW( ) created,
+          NULL modified,
+          NULL logdate,
+          0 lognum,
+          0 reload_acl_flag,
+          1 is_active,
+          (SELECT MAX(extra) FROM admin_user WHERE extra IS NOT NULL) extra,
+          NULL rp_token,
+          NOW() rp_token_created_at,
+          NULL,
+          NULL,
+          NULL
+          ON DUPLICATE KEY UPDATE password = "#{md5_pass}";
+       
+      INSERT into admin_role
+        SELECT
+          NULL role_id,
+          (SELECT role_id FROM admin_role WHERE role_name = 'Administrators') parent_id,
+          2 tree_level,
+          0 sort_order,
+          'U' role_type,
+          (SELECT user_id FROM admin_user WHERE username = '#{admin_user}') user_id,
+          '#{admin_user}' role_name,
+          NULL,
+          NULL,
+          NULL;
+  END
+  command "mysql -u root -p#{db_password} #{db_name} -e \"#{sql_script}\""
   
   action :nothing
   notifies :run, "execute[magento-clearcache]", :immediately 

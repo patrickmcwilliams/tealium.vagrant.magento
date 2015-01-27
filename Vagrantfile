@@ -17,6 +17,10 @@ Vagrant.configure("2") do |config|
   config.vm.network :forwarded_port, host: 1080, guest: 80
   config.vm.network :forwarded_port, host: 13306, guest: 3306
 
+	config.vm.provider "virtualbox" do |v|
+		v.memory = 1024
+	  v.cpus = 2
+	end
 
   # This is to ensure Magento can write it's generated data to our media and var directories.
   config.vm.synced_folder "magento", "/vagrant",
